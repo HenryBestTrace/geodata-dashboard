@@ -1,3 +1,4 @@
+import os
 from dash import Dash, dcc, html, Input, Output
 import dash_bootstrap_components as dbc
 import pandas as pd
@@ -53,8 +54,88 @@ home_layout = html.Div(
                 html.Div(
                     [
                         html.Div(className="separator my-5"),
-                        # 底部内容从main_app_test.py复制
-                        # ...省略以保持简洁...
+                        html.Div(
+                            [
+                                html.Div(
+                                    [
+                                        html.I(
+                                            className="fas fa-chart-line me-3",
+                                            style={"fontSize": "32px", "color": "#4361ee"}
+                                        ),
+                                        html.Div(
+                                            [
+                                                html.H5("Advanced Analytics", className="mb-2"),
+                                                html.P(
+                                                    "Gain deeper insights with our comprehensive visualization tools",
+                                                    className="text-muted mb-0"
+                                                )
+                                            ]
+                                        )
+                                    ],
+                                    className="d-flex align-items-center mb-4"
+                                ),
+                                html.Div(
+                                    [
+                                        html.I(
+                                            className="fas fa-map-marked-alt me-3",
+                                            style={"fontSize": "32px", "color": "#38b000"}
+                                        ),
+                                        html.Div(
+                                            [
+                                                html.H5("Geospatial Mapping", className="mb-2"),
+                                                html.P(
+                                                    "Explore geographical patterns and spatial relationships in your data",
+                                                    className="text-muted mb-0"
+                                                )
+                                            ]
+                                        )
+                                    ],
+                                    className="d-flex align-items-center"
+                                )
+                            ],
+                            className="col-md-6"
+                        ),
+                        html.Div(
+                            [
+                                html.Div(
+                                    [
+                                        html.I(
+                                            className="fas fa-comments me-3",
+                                            style={"fontSize": "32px", "color": "#8338ec"}
+                                        ),
+                                        html.Div(
+                                            [
+                                                html.H5("Response Analysis", className="mb-2"),
+                                                html.P(
+                                                    "Analyze and categorize responses for better decision making",
+                                                    className="text-muted mb-0"
+                                                )
+                                            ]
+                                        )
+                                    ],
+                                    className="d-flex align-items-center mb-4"
+                                ),
+                                html.Div(
+                                    [
+                                        html.I(
+                                            className="fas fa-project-diagram me-3",
+                                            style={"fontSize": "32px", "color": "#ff5400"}
+                                        ),
+                                        html.Div(
+                                            [
+                                                html.H5("Comparative Insights", className="mb-2"),
+                                                html.P(
+                                                    "Compare ideas across different locations and contexts",
+                                                    className="text-muted mb-0"
+                                                )
+                                            ]
+                                        )
+                                    ],
+                                    className="d-flex align-items-center"
+                                )
+                            ],
+                            className="col-md-6"
+                        )
                     ],
                     className="row mt-5 pt-3 feature-section"
                 ),
@@ -163,14 +244,74 @@ def create_map(filtered_df):
                     text=hover_text
                 ))
             elif geom.geom_type == 'LineString':
-                # 线条处理代码
-                pass
+                # Get coordinates from line
+                coords = list(geom.coords)
+                lons = []
+                lats = []
+                
+                # Convert each coordinate from Web Mercator to WGS84
+                for x, y in coords:
+                    lon, lat = mercator_to_wgs84(x, y)
+                    lons.append(lon)
+                    lats.append(lat)
+                
+                all_lats.extend(lats)
+                all_lons.extend(lons)
+                
+                # Add the line
+                fig.add_trace(go.Scattermapbox(
+                    mode="lines",
+                    lon=lons,
+                    lat=lats,
+                    line={'width': 3, 'color': colors[i % len(colors)].replace('0.4)', '0.8)')},  # Increased line opacity
+                    name=f"Row {i+1}",
+                    hoverinfo="text",
+                    text=hover_text
+                ))
             elif geom.geom_type == 'Point':
-                # 点处理代码
-                pass
+                # Convert point from Web Mercator to WGS84
+                lon, lat = mercator_to_wgs84(geom.x, geom.y)
+                
+                # Add the point
+                fig.add_trace(go.Scattermapbox(
+                    mode="markers",
+                    lon=[lon],
+                    lat=[lat],
+                    marker={'size': 10, 'color': colors[i % len(colors)].replace('0.4)', '0.8)')},  # Increased marker opacity
+                    name=f"Row {i+1}",
+                    hoverinfo="text",
+                    text=hover_text
+                ))
+                all_lats.append(lat)
+                all_lons.append(lon)
             elif geom.geom_type == 'MultiPolygon':
-                # 多边形处理代码
-                pass
+                # Handle MultiPolygon geometries
+                for poly in geom.geoms:
+                    # Get coordinates from polygon exterior
+                    coords = list(poly.exterior.coords)
+                    lons = []
+                    lats = []
+                    
+                    # Convert each coordinate from Web Mercator to WGS84
+                    for x, y in coords:
+                        lon, lat = mercator_to_wgs84(x, y)
+                        lons.append(lon)
+                        lats.append(lat)
+                    
+                    all_lats.extend(lats)
+                    all_lons.extend(lons)
+                    
+                    # Add each polygon as a filled area with the same color
+                    fig.add_trace(go.Scattermapbox(
+                        fill="toself",
+                        lon=lons,
+                        lat=lats,
+                        marker={'color': 'black', 'size': 2},  # Reduced marker size
+                        fillcolor=colors[i % len(colors)],
+                        name=f"Row {i+1}",
+                        hoverinfo="text",
+                        text=hover_text
+                    ))
         except Exception as e:
             print(f"Error processing geometry at row {i}: {e}")
     
@@ -196,24 +337,100 @@ def create_map(filtered_df):
 # Location Differences Dashboard布局
 def location_differences_layout():
     try:
-        df = pd.read_csv("output_location_differences.csv")
+        # 列出当前目录的文件，用于调试
+        current_files = os.listdir('.')
+        print(f"Current directory files: {current_files}")
+        
+        # 尝试使用不同的编码读取文件
+        file_path = "output_location_differences.csv"
+        if file_path not in current_files:
+            return html.Div([
+                html.H3("Error loading Location Differences Dashboard"),
+                html.P(f"Error: File '{file_path}' not found in current directory."),
+                html.P("Available files:"),
+                html.Ul([html.Li(file) for file in current_files])
+            ])
+            
+        try:
+            # 首先尝试使用cp1252编码
+            df = pd.read_csv(file_path, encoding='cp1252')
+        except UnicodeDecodeError:
+            try:
+                # 然后尝试使用utf-8编码
+                df = pd.read_csv(file_path, encoding='utf-8')
+            except UnicodeDecodeError:
+                try:
+                    # 最后尝试使用latin1编码(几乎可以读取任何文件，但可能有字符替换)
+                    df = pd.read_csv(file_path, encoding='latin1')
+                except Exception as e:
+                    return html.Div([
+                        html.H3("Error loading Location Differences Dashboard"),
+                        html.P(f"Error reading CSV with multiple encodings: {str(e)}"),
+                        html.P("Please check that the data file is properly encoded.")
+                    ])
+            
+        # 确保数值列正确类型化
         df['area'] = pd.to_numeric(df['area'], errors='coerce')
         df['shape_index'] = pd.to_numeric(df['shape_index'], errors='coerce')
-        df_main = df[['category', 'sub']].drop_duplicates().reset_index(drop=True)
         
+        # 这里展示一个简单的数据表而不是复杂的交互式仪表板，作为示例
         return html.Div([
-            html.H1("Location Differences Dashboard", style={'textAlign': 'center'}),
+            html.H1("Location Differences Dashboard", style={'textAlign': 'center', 'marginBottom': '20px'}),
+            # html.H1("Location Differences Dashboard", style={'textAlign': 'center', 'marginBottom': '20px'}),
             html.Div([
-                dcc.Input(id="location-search-input", type="text", placeholder="Enter Category or Sub"),
-                html.Button("Search", id="location-search-button")
+                html.P("Data file loaded successfully!", className="text-success"),
+                html.P(f"Found {len(df)} records in dataset.")
             ], style={'textAlign': 'center', 'marginBottom': '20px'}),
-            html.Div(id="location-table-container")
+            
+            # 简单的数据表显示
+            html.Div([
+                html.H3("Sample Data", style={'textAlign': 'center'}),
+                dbc.Table.from_dataframe(
+                    df.head(10),
+                    striped=True,
+                    bordered=True,
+                    hover=True,
+                    responsive=True
+                )
+            ]),
+            
+            # 这里可以添加更多交互组件，如筛选器、图表等
+            html.Div([
+                html.H3("Map Visualization", style={'textAlign': 'center', 'marginTop': '30px'}),
+                html.P("Select a category and sub to view on map:"),
+                dcc.Dropdown(
+                    id='category-dropdown',
+                    options=[{'label': cat, 'value': cat} for cat in df['category'].unique()],
+                    value=df['category'].iloc[0] if not df.empty else None,
+                    style={'marginBottom': '10px'}
+                ),
+                dcc.Dropdown(
+                    id='sub-dropdown',
+                    placeholder="Select a sub-category",
+                ),
+                dcc.Graph(
+                    id='location-map',
+                    style={'height': '600px', 'marginTop': '20px'}
+                )
+            ])
         ])
     except Exception as e:
+        # 捕获所有异常，显示详细错误信息
+        import traceback
+        error_details = traceback.format_exc()
+        
         return html.Div([
-            html.H3("Error loading Location Differences Dashboard"),
+            html.H3("Error loading Location Differences Dashboard", style={'color': 'red'}),
             html.P(f"Error: {str(e)}"),
-            html.P("Please check that the data file 'output_location_differences.csv' exists.")
+            html.Details([
+                html.Summary("Error Details (click to expand)"),
+                html.Pre(error_details, style={'whiteSpace': 'pre-wrap', 'overflowX': 'auto', 'backgroundColor': '#f8f9fa', 'padding': '15px'})
+            ]),
+            html.P("Please check that the data file 'output_location_differences.csv' exists and is properly encoded."),
+            html.Div([
+                html.H4("Available Files:"),
+                html.Ul([html.Li(file) for file in os.listdir('.')])
+            ])
         ])
 
 # 其他子仪表板的布局函数
@@ -286,7 +503,65 @@ def display_page(pathname):
             dcc.Link("Return to home page", href="/")
         ]), button_style
 
-# 如果需要，可以添加更多回调函数来处理子仪表板的交互
+# 为Location Differences仪表板添加回调函数
+@app.callback(
+    Output('sub-dropdown', 'options'),
+    Input('category-dropdown', 'value')
+)
+def update_sub_dropdown(selected_category):
+    if not selected_category:
+        return []
+    
+    try:
+        # 读取数据，与前面相同的编码处理
+        try:
+            df = pd.read_csv("output_location_differences.csv", encoding='cp1252')
+        except UnicodeDecodeError:
+            try:
+                df = pd.read_csv("output_location_differences.csv", encoding='utf-8')
+            except UnicodeDecodeError:
+                df = pd.read_csv("output_location_differences.csv", encoding='latin1')
+        
+        # 筛选选定类别的子类别
+        filtered_df = df[df['category'] == selected_category]
+        subs = filtered_df['sub'].unique()
+        
+        return [{'label': sub, 'value': sub} for sub in subs]
+    except Exception as e:
+        print(f"Error updating sub dropdown: {str(e)}")
+        return []
+
+@app.callback(
+    Output('location-map', 'figure'),
+    [Input('category-dropdown', 'value'),
+     Input('sub-dropdown', 'value')]
+)
+def update_map(selected_category, selected_sub):
+    if not selected_category or not selected_sub:
+        return go.Figure()
+    
+    try:
+        # 读取数据，与前面相同的编码处理
+        try:
+            df = pd.read_csv("output_location_differences.csv", encoding='cp1252')
+        except UnicodeDecodeError:
+            try:
+                df = pd.read_csv("output_location_differences.csv", encoding='utf-8')
+            except UnicodeDecodeError:
+                df = pd.read_csv("output_location_differences.csv", encoding='latin1')
+        
+        # 确保数值列正确类型化
+        df['area'] = pd.to_numeric(df['area'], errors='coerce')
+        df['shape_index'] = pd.to_numeric(df['shape_index'], errors='coerce')
+        
+        # 筛选数据
+        filtered_df = df[(df['category'] == selected_category) & (df['sub'] == selected_sub)]
+        
+        # 创建地图
+        return create_map(filtered_df)
+    except Exception as e:
+        print(f"Error updating map: {str(e)}")
+        return go.Figure()
 
 if __name__ == "__main__":
     app.run_server(debug=False)

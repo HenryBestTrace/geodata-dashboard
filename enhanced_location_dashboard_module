@@ -1,34 +1,22 @@
-# Import necessary libraries
-from dash import Dash, dcc, html, dash_table
-from dash.dependencies import Input, Output, State
+"""
+Enhanced Location Dashboard Module
+---------------------------------
+This module provides the layout and callbacks for the Location Differences dashboard
+"""
+
+from dash import html, dcc, Input, Output, State, dash_table, callback
 import pandas as pd
-from urllib.parse import parse_qs, unquote, quote
+import json
+import dash
 import plotly.graph_objects as go
 from shapely import wkt
 import numpy as np
 import warnings
+import os
+from urllib.parse import parse_qs, unquote, quote
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
-
-# Read the data with correct encoding
-try:
-    df = pd.read_csv("output_location_differences.csv", encoding='cp1252')
-except:
-    # Fallback to UTF-8 if cp1252 fails
-    df = pd.read_csv("output_location_differences.csv", encoding='utf-8')
-
-# Ensure numeric columns are properly typed
-df['area'] = pd.to_numeric(df['area'], errors='coerce')
-df['shape_index'] = pd.to_numeric(df['shape_index'], errors='coerce')
-
-# Process main table: deduplicate Category + sub
-df_main = df[['category', 'sub']].drop_duplicates().reset_index(drop=True)
-df_main["RowSpan"] = df_main.groupby("category")["sub"].transform("count")
-
-# Initialize Dash app
-app = Dash(__name__)
-app.config.suppress_callback_exceptions = True
 
 # Style definitions
 header_style = {
@@ -57,6 +45,28 @@ map_style = {
     'border': '1px solid #ddd',
     'borderRadius': '5px'
 }
+
+# Read the data with correct encoding
+def load_data():
+    try:
+        df = pd.read_csv("output_location_differences.csv", encoding='cp1252')
+    except:
+        # Fallback to UTF-8 if cp1252 fails
+        try:
+            df = pd.read_csv("output_location_differences.csv", encoding='utf-8')
+        except:
+            # If file doesn't exist, create empty dataframe with appropriate columns
+            df = pd.DataFrame(columns=['category', 'sub', 'response', 'area', 'shape_index', 'OLCs', 'geometry'])
+            
+    # Ensure numeric columns are properly typed
+    df['area'] = pd.to_numeric(df['area'], errors='coerce')
+    df['shape_index'] = pd.to_numeric(df['shape_index'], errors='coerce')
+    
+    # Process main table: deduplicate Category + sub
+    df_main = df[['category', 'sub']].drop_duplicates().reset_index(drop=True)
+    df_main["RowSpan"] = df_main.groupby("category")["sub"].transform("count")
+    
+    return df, df_main
 
 # Function to convert from Web Mercator to WGS84
 def mercator_to_wgs84(x, y):
@@ -102,7 +112,6 @@ def create_map(filtered_df):
             # Format hover text with proper handling of NaN values
             area_text = f"Area: {row['area']:.2f}" if not pd.isna(row['area']) else "Area: N/A"
             shape_index_text = f"Shape Index: {row['shape_index']:.2f}" if not pd.isna(row['shape_index']) else "Shape Index: N/A"
-            # wrong_text = f"Wrong: {row['wrong']}" if not pd.isna(row['wrong']) else "Wrong: N/A"
             response_text = f"Response: {row['response']}" if not pd.isna(row['response']) else "Response: N/A"
             olc_text = f"OLC: {row['OLCs']}" if not pd.isna(row['OLCs']) else "OLC: N/A"
             
@@ -225,32 +234,174 @@ def create_map(filtered_df):
     
     return fig
 
-# Main page layout (with search box)
-main_layout = html.Div([
-    html.H1("Location Differences Dashboard", style={'textAlign': 'center'}),
-    html.Div([
-        dcc.Input(id="search-input", type="text", placeholder="Enter Category or Sub"),
-        html.Button("Search", id="search-button")
-    ], style={'textAlign': 'center', 'marginBottom': '20px'}),
-    html.Div(
-        html.Table(
-            id='main-table',
-            style={'width': '100%', 'borderCollapse': 'collapse'},
-            children=[
-                html.Thead(
-                    html.Tr([
-                        html.Th("Category", style=header_style),
-                        html.Th("Sub-Category", style=header_style)
-                    ])
-                ),
-                html.Tbody(id="table-body")
-            ]
-        )
+# Register all callbacks for this module
+def register_callbacks(app):
+    @app.callback(
+        Output("loc-table-body", "children"),
+        [Input("search-button", "n_clicks")],
+        [State("search-input", "value")]
     )
-])
+    def update_table_body(n_clicks, search_term):
+        df, df_main = load_data()
+        
+        # Filter data if search term is provided
+        if search_term:
+            filtered_df = df_main[
+                (df_main["category"].str.contains(search_term, case=False)) | 
+                (df_main["sub"].str.contains(search_term, case=False))
+            ]
+        else:
+            filtered_df = df_main
+
+        rows = []
+        current_category = None
+
+        for index, row in filtered_df.iterrows():
+            category = row["category"]
+            sub = row["sub"]
+
+            if category != current_category:
+                current_category = category
+                rowspan = int(row["RowSpan"])
+                rows.append(html.Tr([
+                    html.Td(
+                        category,
+                        rowSpan=rowspan,
+                        style=cell_style
+                    ),
+                    html.Td(
+                        html.Button(
+                            sub,
+                            id={"type": "sub-button", "index": index, "category": category, "sub": sub},
+                            style={
+                                'width': '100%',
+                                'textAlign': 'left',
+                                'backgroundColor': 'transparent',
+                                'border': 'none',
+                                'cursor': 'pointer',
+                                'fontFamily': 'inherit',
+                                'fontSize': 'inherit',
+                                'padding': '0',
+                                'color': '#0066cc',
+                                'textDecoration': 'underline'
+                            }
+                        ),
+                        style=cell_style
+                    )
+                ]))
+            else:
+                rows.append(html.Tr([
+                    html.Td(
+                        html.Button(
+                            sub,
+                            id={"type": "sub-button", "index": index, "category": category, "sub": sub},
+                            style={
+                                'width': '100%',
+                                'textAlign': 'left',
+                                'backgroundColor': 'transparent',
+                                'border': 'none',
+                                'cursor': 'pointer',
+                                'fontFamily': 'inherit',
+                                'fontSize': 'inherit',
+                                'padding': '0',
+                                'color': '#0066cc',
+                                'textDecoration': 'underline'
+                            }
+                        ),
+                        style=cell_style
+                    )
+                ]))
+        
+        if not rows:
+            rows = [html.Tr(html.Td("No matching records found", colSpan=2, style={'textAlign': 'center', 'padding': '20px'}))]
+            
+        return rows
+    
+    @app.callback(
+        Output("loc-state", "data"),
+        [Input({"type": "sub-button", "index": dash.ALL, "category": dash.ALL, "sub": dash.ALL}, "n_clicks"),
+         Input("back-to-main-btn", "n_clicks")],
+        [State("loc-state", "data")]
+    )
+    def update_page_state(sub_clicks, back_clicks, current_state):
+        ctx = dash.callback_context
+        
+        if not ctx.triggered:
+            return current_state
+            
+        # Get the ID of the component that triggered the callback
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        
+        # Handle back button
+        if trigger_id == "back-to-main-btn":
+            return {'view': 'main', 'category': None, 'sub': None}
+            
+        # Handle sub-category selection
+        try:
+            trigger = json.loads(trigger_id)
+            if trigger.get('type') == 'sub-button':
+                return {
+                    'view': 'detail',
+                    'category': trigger.get('category'),
+                    'sub': trigger.get('sub')
+                }
+        except:
+            pass
+            
+        return current_state
+
+# Main layout generator
+def get_main_layout():
+    df, df_main = load_data()
+    
+    return html.Div([
+        html.H1("Location Differences Dashboard", style={'textAlign': 'center'}),
+        html.Div([
+            dcc.Input(id="search-input", type="text", placeholder="Enter Category or Sub"),
+            html.Button("Search", id="search-button")
+        ], style={'textAlign': 'center', 'marginBottom': '20px'}),
+        html.Div(
+            html.Table(
+                id='main-table',
+                style={'width': '100%', 'borderCollapse': 'collapse'},
+                children=[
+                    html.Thead(
+                        html.Tr([
+                            html.Th("Category", style=header_style),
+                            html.Th("Sub-Category", style=header_style)
+                        ])
+                    ),
+                    html.Tbody(id="loc-table-body")
+                ]
+            )
+        )
+    ])
 
 # Detail page layout with custom HTML table for cell merging
-def detail_layout(category, sub):
+def get_detail_layout(category=None, sub=None):
+    df, _ = load_data()
+    
+    # Handle case where parameters are not provided
+    if not category or not sub:
+        return html.Div([
+            html.Button(
+                "🔙 Back to Dashboard",
+                id="back-to-main-btn",
+                style={
+                    'margin': '10px',
+                    'padding': '8px 16px',
+                    'backgroundColor': '#007bff',
+                    'color': 'white',
+                    'borderRadius': '4px',
+                    'border': 'none',
+                    'cursor': 'pointer',
+                    'display': 'inline-block'
+                }
+            ),
+            html.H3("Please select a category and subcategory from the main page", 
+                   style={'textAlign': 'center', 'marginTop': '50px', 'color': '#666'})
+        ])
+    
     filtered_df = df[(df["category"] == category) & (df["sub"] == sub)]
     
     # Create data for the HTML table with merged cells
@@ -283,7 +434,6 @@ def detail_layout(category, sub):
                     html.Td(row['response'], style=cell_style),
                     html.Td(f"{row['area']:.2f}" if not pd.isna(row['area']) else "N/A", style=cell_style),
                     html.Td(f"{row['shape_index']:.2f}" if not pd.isna(row['shape_index']) else "N/A", style=cell_style),
-                    # html.Td(row['wrong'], style=cell_style),
                     html.Td(row['OLCs'] if not pd.isna(row['OLCs']) else "N/A", style=cell_style)
                 ])
             )
@@ -294,22 +444,22 @@ def detail_layout(category, sub):
                     html.Td(row['response'], style=cell_style),
                     html.Td(f"{row['area']:.2f}" if not pd.isna(row['area']) else "N/A", style=cell_style),
                     html.Td(f"{row['shape_index']:.2f}" if not pd.isna(row['shape_index']) else "N/A", style=cell_style),
-                    # html.Td(row['wrong'], style=cell_style),
                     html.Td(row['OLCs'] if not pd.isna(row['OLCs']) else "N/A", style=cell_style)
                 ])
             )
     
     return html.Div([
-        dcc.Link(
-            "🔙 Back",
-            href="/",
+        html.Button(
+            "🔙 Back to Main",
+            id="back-to-main-btn",
             style={
                 'margin': '10px',
                 'padding': '8px 16px',
                 'backgroundColor': '#007bff',
                 'color': 'white',
                 'borderRadius': '4px',
-                'textDecoration': 'none',
+                'border': 'none',
+                'cursor': 'pointer',
                 'display': 'inline-block'
             }
         ),
@@ -325,7 +475,6 @@ def detail_layout(category, sub):
                         html.Th("Response", style=header_style),
                         html.Th("Area", style=header_style),
                         html.Th("Shape Index", style=header_style),
-                        # html.Th("Wrong", style=header_style),
                         html.Th("OLC", style=header_style)
                     ])
                 ),
@@ -334,87 +483,36 @@ def detail_layout(category, sub):
         ),
         
         dcc.Graph(
-            id='geometry-map',
+            id='loc-geometry-map',
             figure=create_map(filtered_df),
             style=map_style
         )
     ])
 
-# Callback functions
-@app.callback(
-    Output('page-content', 'children'),
-    [Input('url', 'pathname'),
-     Input('url', 'search')]
-)
-def display_page(pathname, search):
-    if pathname == '/detail':
-        params = parse_qs(search.lstrip('?'))
-        category = unquote(params.get('category', [None])[0])
-        sub = unquote(params.get('sub', [None])[0])
-        return detail_layout(category, sub) if category and sub else main_layout
-    return main_layout
+# Combined layout for this module with state management
+def get_layout(app):
+    """Initialize the dashboard layout and register callbacks"""
+    
+    # Register callbacks for this module
+    register_callbacks(app)
+    
+    # Create main layout with state management
+    return html.Div([
+        dcc.Location(id='loc-url', refresh=False),
+        dcc.Store(id='loc-state', data={'view': 'main', 'category': None, 'sub': None}),
+        html.Div(id='loc-page-content')
+    ])
 
-@app.callback(
-    Output("table-body", "children"),
-    [Input('url', 'pathname'),
-     Input('search-button', 'n_clicks')],
-    [State('search-input', 'value')]
-)
-def update_table_body(pathname, n_clicks, search_term):
-    # Filter data if search term is provided
-    if search_term:
-        filtered_df = df_main[
-            (df_main["category"].str.contains(search_term, case=False)) | 
-            (df_main["sub"].str.contains(search_term, case=False))
-        ]
+# Handle page content based on state
+@callback(
+    Output('loc-page-content', 'children'),
+    [Input('loc-state', 'data')])
+def render_page_content(state):
+    view = state.get('view', 'main')
+    
+    if view == 'main':
+        return get_main_layout()
+    elif view == 'detail':
+        return get_detail_layout(state.get('category'), state.get('sub'))
     else:
-        filtered_df = df_main
-
-    rows = []
-    current_category = None
-
-    for index, row in filtered_df.iterrows():
-        category = row["category"]
-        sub = row["sub"]
-
-        if category != current_category:
-            current_category = category
-            rowspan = int(row["RowSpan"])
-            rows.append(html.Tr([
-                html.Td(
-                    category,
-                    rowSpan=rowspan,
-                    style=cell_style
-                ),
-                html.Td(
-                    dcc.Link(
-                        sub,
-                        href=f"/detail?category={quote(category)}&sub={quote(sub)}",
-                        target="_blank",
-                        style=link_style
-                    ),
-                    style=cell_style
-                )
-            ]))
-        else:
-            rows.append(html.Tr([
-                html.Td(
-                    dcc.Link(
-                        sub,
-                        href=f"/detail?category={quote(category)}&sub={quote(sub)}",
-                        target="_blank",
-                        style=link_style
-                    ),
-                    style=cell_style
-                )
-            ]))
-    return rows
-
-# App configuration
-app.layout = html.Div([
-    dcc.Location(id='url', refresh=False),
-    html.Div(id='page-content')
-])
-
-if __name__ == "__main__":
-    app.run_server(debug=True, port=8050)
+        return get_main_layout()

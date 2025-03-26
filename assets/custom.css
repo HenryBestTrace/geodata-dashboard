@@ -1,0 +1,108 @@
+
+        /* Enhanced Light Theme Dashboard Styles */
+        
+        body { 
+            font-family: 'Inter', 'Segoe UI', 'Roboto', sans-serif; 
+            background-color: #fbfbfd;
+            color: #333;
+        }
+        
+        /* Card hover effects */
+        .dashboard-card {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            background-color: white;
+            border: none;
+        }
+        
+        .dashboard-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1) !important;
+        }
+        
+        /* Button hover effect */
+        .dashboard-button:hover {
+            color: white !important;
+            background-color: var(--hover-color) !important;
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Button color variations */
+        .dashboard-card:nth-child(1) .dashboard-button { --hover-color: #4361ee; }
+        .dashboard-card:nth-child(2) .dashboard-button { --hover-color: #38b000; }
+        .dashboard-card:nth-child(3) .dashboard-button { --hover-color: #8338ec; }
+        .dashboard-card:nth-child(4) .dashboard-button { --hover-color: #ff5400; }
+        
+        /* Header line */
+        .header-line {
+            height: 4px;
+            background: linear-gradient(90deg, #4361ee, #38b000, #8338ec, #ff5400);
+            border-radius: 2px;
+        }
+        
+        /* Section separator */
+        .separator {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, #e0e0e0, transparent);
+            position: relative;
+        }
+        
+        .separator::before {
+            content: '';
+            position: absolute;
+            width: 100px;
+            height: 3px;
+            background: linear-gradient(90deg, #4361ee, #38b000);
+            top: -1px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-radius: 3px;
+        }
+        
+        /* Feature section styling */
+        .feature-section {
+            background-color: #f8faff;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 3px 15px rgba(0, 0, 0, 0.03);
+        }
+        
+        /* Animation for page transitions */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        #page-content {
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        /* Modern scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #c0c0c0;
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a0a0a0;
+        }
+        
+        /* Home button styling */
+        #home-button {
+            transition: all 0.3s ease;
+        }
+        
+        #home-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.15) !important;
+        }
+        

@@ -376,7 +376,6 @@ def location_differences_layout():
         # 这里展示一个简单的数据表而不是复杂的交互式仪表板，作为示例
         return html.Div([
             html.H1("Location Differences Dashboard", style={'textAlign': 'center', 'marginBottom': '20px'}),
-            # html.H1("Location Differences Dashboard", style={'textAlign': 'center', 'marginBottom': '20px'}),
             html.Div([
                 html.P("Data file loaded successfully!", className="text-success"),
                 html.P(f"Found {len(df)} records in dataset.")

@@ -715,7 +715,7 @@ def display_page(pathname, running_subapps_data):
             ),
             html.Iframe(
                 id="dashboard-iframe",
-                src=f"http://127.0.0.1:{port}/",
+                src=f"/{selected_dashboard['module_name']}/",
                 style={
                     "width": "100%", 
                     "height": "800px", 

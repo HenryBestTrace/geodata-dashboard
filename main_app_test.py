@@ -1,25 +1,30 @@
-from dash import Dash, dcc, html, Input, Output, State, callback_context
+import dash
+from dash import dcc, html, Input, Output, State, callback_context
 import dash_bootstrap_components as dbc
 import os
 import sys
-import threading
 import importlib.util
 import traceback
 from PIL import Image, ImageDraw
-import random
-import time
 import webbrowser
+import pandas as pd
+from urllib.parse import parse_qs, unquote, quote
+import plotly.graph_objects as go
+from shapely import wkt
+import numpy as np
+import warnings
 
-# 全局变量控制浏览器是否已被打开
-browser_opened = False
-
-# Use a light modern theme with BOOTSTRAP + Font Awesome for icons
-app = Dash(
+# Initialize the main Dash app
+app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP, dbc.icons.FONT_AWESOME],
-    suppress_callback_exceptions=True
+    suppress_callback_exceptions=True,
+    meta_tags=[
+        {"name": "viewport", "content": "width=device-width, initial-scale=1"}
+    ]
 )
-server = app.server
+server = app.server  # Needed for Render deployment
+
 # Define dashboard items with icons
 dashboard_items = [
     {
@@ -29,9 +34,8 @@ dashboard_items = [
         "icon": "fa-solid fa-map-location-dot",
         "image": "./assets/1.png",
         "path": "/geometry",
-        "module_path": "enhanced-location-dashboard.py",  # 修改为新的文件名
-        "module_name": "location_differences",  # 修改为新的模块名
-        "port": 8051,
+        "module_path": "enhanced_location_dashboard_module.py",
+        "module_name": "location_differences",
         "color": "#4361ee"  # Custom blue color
     },
     {
@@ -41,9 +45,8 @@ dashboard_items = [
         "icon": "fa-solid fa-chart-column",
         "image": "./assets/2.png",
         "path": "/response",
-        "module_path": "classified_response_summay.py",
+        "module_path": "classified_response_summary_module.py",
         "module_name": "classified_response",
-        "port": 8052,
         "color": "#38b000"  # Custom green color
     },
     {
@@ -53,9 +56,8 @@ dashboard_items = [
         "icon": "fa-solid fa-brain",
         "image": "./assets/3.png",
         "path": "/conceptual",
-        "module_path": "conceptual_classified_responses.py",
+        "module_path": "conceptual_classified_responses_module.py",
         "module_name": "conceptual_responses",
-        "port": 8053,
         "color": "#8338ec"  # Custom purple color
     },
     {
@@ -65,9 +67,8 @@ dashboard_items = [
         "icon": "fa-solid fa-location-crosshairs",
         "image": "./assets/4.png",
         "path": "/different",
-        "module_path": "different_place_for_sameidea_new2.py",
+        "module_path": "different_place_for_sameidea_module.py",
         "module_name": "different_place",
-        "port": 8054,
         "color": "#ff5400"  # Custom orange color
     }
 ]
@@ -155,7 +156,7 @@ def create_dashboard_cards():
                                         ],
                                         href=item["path"],
                                         className="dashboard-button",
-                                        id=f"btn-{item['id']}",  # 添加ID为每个按钮
+                                        id=f"btn-{item['id']}",
                                         style={
                                             "backgroundColor": "white",
                                             "color": item["color"],
@@ -384,118 +385,7 @@ home_layout = html.Div(
     style={"backgroundColor": "#fbfbfd"}
 )
 
-# 添加一个Loading组件以显示加载状态
-loading_layout = dbc.Spinner(
-    html.Div(
-        "Loading dashboard...",
-        id="loading-message",
-        style={
-            "textAlign": "center",
-            "marginTop": "200px",
-            "fontSize": "24px",
-            "color": "#666"
-        }
-    ),
-    size="lg",
-    color="#4361ee",
-    type="grow",
-    fullscreen=True,
-)
-
-# Main application layout
-app.layout = html.Div(
-    [
-        dcc.Location(id="url", refresh=False),
-        html.Div(id="loading-container"),
-        html.Div(id="debug-info", style={"padding": "10px", "background": "#f8d7da", "display": "none"}),
-        html.Div(id="page-content"),
-        html.Div(
-            dbc.Button(
-                [
-                    html.I(className="fas fa-home me-2"),
-                    "Back to Home"
-                ],
-                id="home-button",
-                href="/",
-                color="primary",
-                className="mt-3 px-4 py-2",
-                style={"display": "none", "borderRadius": "30px", "boxShadow": "0 4px 10px rgba(0,0,0,0.1)"}
-            ),
-            id="home-button-container",
-            className="text-center mb-3"
-        ),
-        # Store running sub-apps info
-        dcc.Store(id="running-subapps", data={}),
-        # 添加状态通知组件
-        dbc.Toast(
-            id="status-toast",
-            header="Status",
-            is_open=False,
-            dismissable=True,
-            duration=5000,
-            style={"position": "fixed", "top": 10, "right": 10, "zIndex": 1000}
-        ),
-    ]
-)
-
-# 用于显示状态通知的回调
-@app.callback(
-    [Output("status-toast", "is_open"),
-     Output("status-toast", "header"),
-     Output("status-toast", "children"),
-     Output("status-toast", "color")],
-    [Input("url", "pathname")],
-    [State("running-subapps", "data")]
-)
-def show_status(pathname, running_subapps_data):
-    if pathname == "/" or not pathname:
-        return False, "", "", "primary"
-    
-    # 查找匹配的仪表板
-    selected_dashboard = None
-    for item in dashboard_items:
-        if item["path"] == pathname:
-            selected_dashboard = item
-            break
-    
-    if not selected_dashboard:
-        return False, "", "", "primary"
-    
-    # 检查子应用是否正在加载或已加载
-    if selected_dashboard["path"] in running_subapps_data:
-        return True, "Dashboard Ready", f"{selected_dashboard['title']} is ready.", "success"
-    else:
-        return True, "Loading Dashboard", f"Loading {selected_dashboard['title']}...", "primary"
-
-# 添加加载显示回调
-@app.callback(
-    Output("loading-container", "children"),
-    [Input("url", "pathname")],
-    [State("running-subapps", "data")]
-)
-def show_loading(pathname, running_subapps_data):
-    if pathname == "/" or not pathname:
-        return ""
-    
-    # 查找匹配的仪表板
-    selected_dashboard = None
-    for item in dashboard_items:
-        if item["path"] == pathname:
-            selected_dashboard = item
-            break
-    
-    if not selected_dashboard:
-        return ""
-    
-    # 检查子应用是否已加载
-    if selected_dashboard["path"] in running_subapps_data:
-        return ""
-    else:
-        return loading_layout
-
-# Global variable to store sub-app processes
-running_subapps = {}
-
+# Dashboard module loader function
 def load_module(module_path, module_name):
     """Safely load a module and return detailed error information if needed"""
     try:
@@ -532,71 +422,58 @@ def load_module(module_path, module_name):
         print(error_msg)
         return None, error_msg
 
-# 检查端口是否被占用
-def is_port_in_use(port):
-    import socket
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(('localhost', port)) == 0
-
-# 寻找可用端口
-def find_available_port(start_port):
-    port = start_port
-    while is_port_in_use(port):
-        port += 1
-    return port
-
-# Run sub-application in a separate thread
-def run_subapp(module, port, module_name):
-    try:
-        # Save current working directory
-        original_cwd = os.getcwd()
-        
-        # Change working directory to module location
-        module_dir = os.path.dirname(os.path.abspath(sys.modules[module_name].__file__))
-        os.chdir(module_dir)
-        
-        print(f"Starting sub-application {module_name} on port {port}...")
-        print(f"Working directory: {os.getcwd()}")
-        
-        # 添加错误处理和重试机制
-        try:
-            # Start sub-application
-            module.app.run_server(debug=False, port=port, use_reloader=False, host='127.0.0.1', dev_tools_ui=False, dev_tools_props_check=False)
-        except Exception as e:
-            print(f"Error starting sub-app on port {port}: {str(e)}")
-            # 尝试在不同端口重启
-            try:
-                new_port = find_available_port(port + 100)
-                print(f"Retrying on port {new_port}...")
-                module.app.run_server(debug=False, port=new_port, use_reloader=False, host='127.0.0.1', dev_tools_ui=False, dev_tools_props_check=False)
-            except Exception as retry_e:
-                print(f"Failed to start sub-app even with new port: {str(retry_e)}")
-        
-        # Restore original working directory
-        os.chdir(original_cwd)
-    except Exception as e:
-        print(f"Error running sub-application: {str(e)}\n{traceback.format_exc()}")
+# Main application layout
+app.layout = html.Div(
+    [
+        dcc.Location(id="url", refresh=False),
+        html.Div(id="loading-container"),
+        html.Div(id="debug-info", style={"padding": "10px", "background": "#f8d7da", "display": "none"}),
+        html.Div(id="page-content"),
+        html.Div(
+            dbc.Button(
+                [
+                    html.I(className="fas fa-home me-2"),
+                    "Back to Home"
+                ],
+                id="home-button",
+                href="/",
+                color="primary",
+                className="mt-3 px-4 py-2",
+                style={"display": "none", "borderRadius": "30px", "boxShadow": "0 4px 10px rgba(0,0,0,0.1)"}
+            ),
+            id="home-button-container",
+            className="text-center mb-3"
+        ),
+        dbc.Toast(
+            id="status-toast",
+            header="Status",
+            is_open=False,
+            dismissable=True,
+            duration=5000,
+            style={"position": "fixed", "top": 10, "right": 10, "zIndex": 1000}
+        ),
+    ]
+)
 
 # Page routing callback
 @app.callback(
     [Output("page-content", "children"),
      Output("home-button", "style"),
      Output("debug-info", "children"),
-     Output("debug-info", "style"),
-     Output("running-subapps", "data")],
+     Output("debug-info", "style")],
     [Input("url", "pathname")],
-    [State("running-subapps", "data")]
 )
-def display_page(pathname, running_subapps_data):
-    global running_subapps
+def display_page(pathname):
+    """Handle page routing for all dashboards"""
     print(f"URL path changed to: {pathname}")
     
-    # Homepage
-    if pathname == "/" or not pathname:
-        return home_layout, {"display": "none"}, "", {"display": "none"}, running_subapps_data
-    
-    # Show return button
+    # Show home button style
     button_style = {"display": "block", "borderRadius": "30px", "boxShadow": "0 4px 10px rgba(0,0,0,0.1)"}
+    hide_button_style = {"display": "none"}
+    
+    # HomePage
+    if pathname == "/" or not pathname:
+        return home_layout, hide_button_style, "", {"display": "none"}
     
     # Find matching dashboard
     selected_dashboard = None
@@ -606,93 +483,27 @@ def display_page(pathname, running_subapps_data):
             break
             
     if not selected_dashboard:
-        return home_layout, {"display": "none"}, "Unknown path", {"display": "block", "padding": "10px", "background": "#f8d7da"}, running_subapps_data
+        return home_layout, hide_button_style, "Unknown path", {"display": "block", "padding": "10px", "background": "#f8d7da"}
     
-    # 复制运行中子应用数据以进行修改
-    updated_subapps_data = dict(running_subapps_data)
+    # Try to load module
+    module, error = load_module(selected_dashboard["module_path"], selected_dashboard["module_name"])
     
-    # 检查端口是否已被占用
-    base_port = selected_dashboard["port"]
-    if is_port_in_use(base_port) and selected_dashboard["path"] not in running_subapps:
-        # 端口被占用，寻找新端口
-        port = find_available_port(base_port + 100)
-        print(f"Port {base_port} is in use. Using port {port} instead.")
-    else:
-        port = base_port
+    if error:
+        debug_msg = f"Error loading {selected_dashboard['title']}: {error}"
+        print(debug_msg)
+        return html.Div([
+            html.H4(f"Error loading {selected_dashboard['title']}"),
+            html.Pre(error, style={"whiteSpace": "pre-wrap", "overflow": "auto", "maxHeight": "300px"}),
+            html.Div([
+                dbc.Button("Try Again", id="retry-button", color="primary", className="me-2", 
+                          href=selected_dashboard["path"]),
+                dbc.Button("Return Home", href="/", color="secondary")
+            ], className="mt-4 d-flex justify-content-center gap-2")
+        ]), button_style, debug_msg, {"display": "block", "padding": "10px", "background": "#f8d7da"}
     
-    # Check if sub-app is already running
-    if selected_dashboard["path"] not in running_subapps:
-        # Try to load module
-        module, error = load_module(selected_dashboard["module_path"], selected_dashboard["module_name"])
-        
-        if error:
-            debug_msg = f"Error loading {selected_dashboard['title']}: {error}"
-            print(debug_msg)
-            return html.Div([
-                html.H4(f"Error loading {selected_dashboard['title']}"),
-                html.Pre(error, style={"whiteSpace": "pre-wrap", "overflow": "auto", "maxHeight": "300px"}),
-                html.Div([
-                    dbc.Button("Try Again", id="retry-button", color="primary", className="me-2", 
-                              href=selected_dashboard["path"]),
-                    dbc.Button("Return Home", href="/", color="secondary")
-                ], className="mt-4 d-flex justify-content-center gap-2")
-            ]), button_style, debug_msg, {"display": "block", "padding": "10px", "background": "#f8d7da"}, running_subapps_data
-        
-        try:
-            # Start sub-app in new thread
-            thread = threading.Thread(
-                target=run_subapp, 
-                args=(module, port, selected_dashboard["module_name"]),
-                daemon=True
-            )
-            thread.start()
-            
-            # Record running sub-app
-            running_subapps[selected_dashboard["path"]] = {
-                "thread": thread,
-                "port": port,
-                "title": selected_dashboard["title"]
-            }
-            
-            # Update stored data
-            updated_subapps_data[selected_dashboard["path"]] = {
-                "port": port,
-                "title": selected_dashboard["title"]
-            }
-            
-            # Give server time to start - 更合理的启动延迟
-            print(f"Waiting for {selected_dashboard['title']} to start...")
-            
-            # 添加超时检查，确保服务器启动或超时
-            max_attempts = 10
-            for attempt in range(max_attempts):
-                time.sleep(0.5)  # 减少每次检查的等待时间
-                # 检查端口是否已经活跃
-                if is_port_in_use(port):
-                    print(f"{selected_dashboard['title']} started successfully on port {port}")
-                    break
-                print(f"Waiting... ({attempt+1}/{max_attempts})")
-                if attempt == max_attempts - 1:
-                    print(f"Warning: Timeout waiting for {selected_dashboard['title']} to start")
-        except Exception as e:
-            error_msg = f"Error starting sub-application: {str(e)}\n{traceback.format_exc()}"
-            print(error_msg)
-            return html.Div([
-                html.H4(f"Error starting {selected_dashboard['title']}"),
-                html.Pre(error_msg, style={"whiteSpace": "pre-wrap", "overflow": "auto", "maxHeight": "300px"}),
-                html.Div([
-                    dbc.Button("Try Again", id="retry-button", color="primary", className="me-2", 
-                              href=selected_dashboard["path"]),
-                    dbc.Button("Return Home", href="/", color="secondary")
-                ], className="mt-4 d-flex justify-content-center gap-2")
-            ]), button_style, error_msg, {"display": "block", "padding": "10px", "background": "#f8d7da"}, running_subapps_data
-    
-    # Get sub-app port
-    port = running_subapps[selected_dashboard["path"]]["port"]
-    
-    # Create iframe to load sub-app
+    # Get the dashboard layout from the module
     try:
-        iframe_layout = html.Div([
+        dashboard_layout = html.Div([
             html.Div([
                 html.I(
                     className=selected_dashboard["icon"], 
@@ -707,121 +518,69 @@ def display_page(pathname, running_subapps_data):
                     className="mb-3",
                     style={"color": "#333"}
                 ),
-            ], className="d-flex align-items-center justify-content-center"),
-            # 添加错误提示和重试选项
-            html.Div(
-                id="iframe-error-message",
-                style={"display": "none", "textAlign": "center", "margin": "20px 0", "color": "#dc3545"}
-            ),
-            html.Iframe(
-                id="dashboard-iframe",
-                src=f"/{selected_dashboard['module_name']}/",
-                style={
-                    "width": "100%", 
-                    "height": "800px", 
-                    "border": "none",
-                    "borderRadius": "12px",
-                    "boxShadow": "0 6px 18px rgba(0,0,0,0.08)"
-                }
-            ),
-            # 添加重试按钮，仅在iframe加载失败时显示
-            html.Div([
-                dbc.Button("Reload Dashboard", id="reload-iframe", color="primary", className="mt-3")
-            ], id="reload-container", className="text-center", style={"display": "none"})
+            ], className="d-flex align-items-center justify-content-center my-3"),
+            
+            # Get the layout from the module
+            module.get_layout(app)
         ])
-        return iframe_layout, button_style, "", {"display": "none"}, updated_subapps_data
+        
+        return dashboard_layout, button_style, "", {"display": "none"}
     except Exception as e:
-        error_msg = f"Error creating interface: {str(e)}\n{traceback.format_exc()}"
+        error_msg = f"Error rendering dashboard: {str(e)}\n{traceback.format_exc()}"
         print(error_msg)
         return html.Div([
-            html.H4(f"Error loading {selected_dashboard['title']} interface"),
+            html.H4(f"Error rendering {selected_dashboard['title']}"),
             html.Pre(error_msg, style={"whiteSpace": "pre-wrap", "overflow": "auto", "maxHeight": "300px"}),
             html.Div([
                 dbc.Button("Try Again", id="retry-button", color="primary", className="me-2", 
                           href=selected_dashboard["path"]),
                 dbc.Button("Return Home", href="/", color="secondary")
             ], className="mt-4 d-flex justify-content-center gap-2")
-        ]), button_style, error_msg, {"display": "block", "padding": "10px", "background": "#f8d7da"}, updated_subapps_data
+        ]), button_style, error_msg, {"display": "block", "padding": "10px", "background": "#f8d7da"}
 
-# 添加客户端回调以检测iframe加载错误
-app.clientside_callback(
-    """
-    function(n) {
-        var iframe = document.getElementById('dashboard-iframe');
-        var errorMessage = document.getElementById('iframe-error-message');
-        var reloadContainer = document.getElementById('reload-container');
+# Make sure to register all callbacks from sub-modules
+# This will be done dynamically when modules are loaded
+
+# Create assets directory if needed 
+if not os.path.exists("assets"):
+    os.makedirs("assets")
+
+# Create sample images if they don't exist
+def create_sample_images():
+    """Create sample images for dashboard cards"""
+    from PIL import Image, ImageDraw
+    
+    if not os.path.exists('assets'):
+        os.makedirs('assets')
+    
+    # Create four colored sample images
+    colors = [
+        (67, 97, 238),  # Blue
+        (56, 176, 0),   # Green
+        (131, 56, 236), # Purple
+        (255, 84, 0)    # Orange
+    ]
+    
+    for i, color in enumerate(colors, 1):
+        img = Image.new('RGB', (400, 200), color=color)
+        draw = ImageDraw.Draw(img)
         
-        if (iframe) {
-            iframe.onerror = function() {
-                if (errorMessage) {
-                    errorMessage.textContent = "Failed to load dashboard. The server may not be responding.";
-                    errorMessage.style.display = "block";
-                }
-                if (reloadContainer) {
-                    reloadContainer.style.display = "block";
-                    
-                }
-            };
+        # Add patterns to make images more interesting
+        for j in range(0, 400, 20):
+            draw.line([(j, 0), (j, 200)], fill=(255, 255, 255, 50), width=1)
+        for j in range(0, 200, 20):
+            draw.line([(0, j), (400, j)], fill=(255, 255, 255, 50), width=1)
             
-            iframe.onload = function() {
-                try {
-                    // Try to access iframe content to check if it loaded properly
-                    var iframeContent = iframe.contentWindow.document;
-                    // If we can access content, hide error message
-                    if (errorMessage) {
-                        errorMessage.style.display = "none";
-                    }
-                    if (reloadContainer) {
-                        reloadContainer.style.display = "none";
-                    }
-                } catch (e) {
-                    // Security error or cross-origin issue
-                    if (errorMessage) {
-                        errorMessage.textContent = "Failed to load dashboard. The server may not be responding.";
-                        errorMessage.style.display = "block"
-                        }
-                    if (reloadContainer) {
-                        reloadContainer.style.display = "block";
-                    }
-                }
-            };
-        }
+        # Draw center pattern
+        draw.ellipse((150, 50, 250, 150), fill=(255, 255, 255, 100))
         
-        return window.dash_clientside.no_update;
-    }
-    """,
-    Output("debug-info", "data"),
-    Input("url", "pathname")
-)
-# 添加重新加载iframe的回调
-@app.callback(
-    Output("dashboard-iframe", "src"),
-    Input("reload-iframe", "n_clicks"),
-    State("url", "pathname"),
-    State("running-subapps", "data"),
-    prevent_initial_call=True
-)
-def reload_iframe(n_clicks, pathname, running_subapps_data):
-    if not n_clicks:
-        return dash.no_update
+        img.save(f'assets/{i}.png')
     
-    # 查找匹配的仪表板和端口
-    for item in dashboard_items:
-        if item["path"] == pathname and pathname in running_subapps_data:
-            port = running_subapps_data[pathname]["port"]
-            # 添加时间戳以避免缓存
-            timestamp = int(time.time())
-            return f"http://127.0.0.1:{port}/?t={timestamp}"
-    
-    # 如果找不到匹配的仪表板，返回当前src
-    return dash.no_update
+    print("Created sample images in assets directory.")
 
-if __name__ == "__main__":
-    # Create assets directory
-    if not os.path.exists("assets"):
-        os.makedirs("assets")
-    
-    # Create custom CSS file with enhanced styles
+# Create custom CSS file
+def create_custom_css():
+    """Create custom CSS for the dashboard"""
     css_file = os.path.join("assets", "custom.css")
     with open(css_file, "w") as f:
         f.write("""
@@ -931,20 +690,53 @@ if __name__ == "__main__":
             transform: translateY(-3px);
             box-shadow: 0 8px 15px rgba(0, 0, 0, 0.15) !important;
         }
+        
+        /* Table styling */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: center;
+        }
+        
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+        
+        /* Link styling */
+        a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
         """)
+    print("Created custom CSS file.")
+
+# Initialize assets before starting the app
+if __name__ == "__main__":
+    # Create assets and resources
+    if not os.path.exists("assets") or not all(os.path.exists(f'assets/{i}.png') for i in range(1, 5)):
+        create_sample_images()
     
-    # 修改：只有在环境变量中指定时才自动打开浏览器    
-    def open_browser():
-        global browser_opened
-        if not browser_opened:
-            browser_opened = True
-            time.sleep(1)
-            webbrowser.open("http://127.0.0.1:8050")
+    # Create CSS
+    create_custom_css()
     
-    # 仅当此脚本直接运行时打开浏览器，而不是被其他脚本导入时
-    if os.environ.get('OPEN_BROWSER', '0') == '1':
-        threading.Thread(target=open_browser, daemon=True).start()
+    # Run the app
+    app.run_server(debug=True)
+else:
+    # When deployed to Render, make sure assets are created
+    if not os.path.exists("assets") or not all(os.path.exists(f'assets/{i}.png') for i in range(1, 5)):
+        create_sample_images()
     
-    # Start server
-    print("Starting dashboard application...")
-    app.run_server(debug=False, port=8050, use_reloader=False)
+    # Create CSS
+    if not os.path.exists(os.path.join("assets", "custom.css")):
+        create_custom_css()
